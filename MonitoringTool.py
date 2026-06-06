@@ -1,6 +1,8 @@
 import sys
 from scapy.all import *
 
+IPs = {}
+
 def main():  
     print("Choose the type of operation you want to perform.")
     OpType = input("live for live capture / read for capture file reading: ")
@@ -32,8 +34,32 @@ def liveCap():
             liveCap()
             pass
 def analysis_func(pkt):
-    if pkt:
-        print(pkt["IP"])
+    if IP in pkt:
+        src = pkt["IP"].src
+        dst = pkt["IP"].dst
+        proto = pkt["IP"].proto
+        flags = 0
+        match (proto):
+            case 6:
+                sport = pkt["TCP"].sport
+                dport = pkt["TCP"].dport
+                flags = pkt["TCP"].flags
+                pass
+            case 17:
+                sport = pkt["UDP"].sport
+                dport = pkt["UDP"].dport
+                pass
+            case 1:
+                sport = pkt["ICMP"].sport
+                dport = pkt["ICMP"].dport
+                pass
+            case _:
+                print(f"Unknown protocol packet from {src}")
+                pass
+        packetCheck(src, dst, proto, sport, dport, flags)
+    #print(f"source = {src}, destination = {dst}, protocol = {proto}, sport = {sport}, dport = {dport}, flags = {flags}")
+def packet_check(src, dst, proto, sport, dport, flags):
+    print(flags)
 if sys.argv[1] == "live":
     liveCap()
 elif __name__ == "__main__":
