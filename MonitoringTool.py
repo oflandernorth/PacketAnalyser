@@ -174,11 +174,11 @@ def get_country(ip):
         return "Unknown"
     except Exception:
         return "Unknown"
-try:
+
+if len(sys.argv) > 1:
     if sys.argv[1] == "live":
         liveCap()
-    elif sys.argv[1] ==  "test":
+    elif sys.argv[1] == "test":
         ip_checker()
-except Exception as e:
-    if __name__ == "__main__":
-        main()
+else:
+    main()
