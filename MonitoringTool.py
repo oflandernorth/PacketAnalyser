@@ -1,4 +1,5 @@
 import sys
+import os
 import requests
 from scapy.all import *
 import sqlite3
@@ -6,8 +7,9 @@ import json
 
 IPs = {}
 ip_observation = {}
-safelist = '.\safelist.txt'
-countries = '.\countries.txt'
+script_dir = os.path.dirname(os.path.abspath(__file__))
+safelist = os.path.join(script_dir, 'safelist.txt')
+countries = os.path.join(script_dir, 'countries.txt')
 checkApi = ''
 conn = ''
 c = ''
@@ -30,7 +32,12 @@ def main():
     conn = sqlite3.connect('PacketAnalyzer.db')
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS ip_observations (
-                IP TEXT, Dport INTEGER, Protocol INTEGER, Country TEXT, Risk INTEGER)''')
+                IP TEXT PRIMARY KEY,
+                Dport INTEGER,
+                Protocol INTEGER,
+                Country TEXT,
+                Risk INTEGER
+            )''')
     conn.commit()
     match (opType):
         case "live":
@@ -108,7 +115,7 @@ def packet_to_list(src, dst, proto, sport, dport, flags):
 def ip_checker():
     global ip_observation, c
     for ip in IPs:
-        response = requests.get(f'https://api.hackertarget.com/geoip/?q={ip}').content.decode().split("\n")[1].split(':', 1)[1].strip()
+        response = get_country(ip)
         ip_observation.update({ip: {"dport": IPs[ip]["dport"],  "proto": IPs[ip]["proto"], "country": response, "score": 0}})
         # Check if the IP is from a dangerous country
         if response in countries:
@@ -139,13 +146,34 @@ def ip_checker():
         if IPs[ip]["dport"] in [22, 23, 445,3389]:
             print(f"Packet from {ip} is targeting a common attack port: {IPs[ip]['dport']}")
             ip_observation[ip]["score"] += 20
-        for ip, data in ip_observation.items():
-            c.execute('''
-                INSERT INTO ip_observations (IP, Dport, Protocol, Country, Risk)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(IP) DO UPDATE SET Risk = Risk + 1
-            ''', (ip, data["dport"], data["proto"], data["country"], data["score"]))
-        conn.commit()
+    for ip, data in ip_observation.items():
+        c.execute('''
+            INSERT INTO ip_observations (IP, Dport, Protocol, Country, Risk)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(IP) DO UPDATE SET Risk = Risk + 1
+        ''', (ip, data["dport"], data["proto"], data["country"], data["score"]))
+    conn.commit()
+def get_country(ip):
+    if ip.startswith(('10.', '172.16.', '172.17.', '172.18.', '172.19.',
+                      '172.20.', '172.21.', '172.22.', '172.23.', '172.24.',
+                      '172.25.', '172.26.', '172.27.', '172.28.', '172.29.',
+                      '172.30.', '172.31.', '192.168.')):
+        return "Private"
+    try:
+        resp = requests.get(f'https://api.hackertarget.com/geoip/?q={ip}', timeout=5)
+        lines = resp.text.splitlines()
+        # Expected format: first line is header, second line is "IP: <ip>, Country: <country>, ..."
+        # Actually Hackertarget returns a line like: "192.0.2.1, United States, US"
+        # So better to split by comma and take the second field.
+        if len(lines) >= 2:
+            # The second line often contains the country (e.g., "185.143.232.201, Iran, IR")
+            parts = lines[1].split(',')
+            if len(parts) >= 2:
+                country = parts[1].strip()
+                return country if country else "Unknown"
+        return "Unknown"
+    except Exception:
+        return "Unknown"
 try:
     if sys.argv[1] == "live":
         liveCap()
