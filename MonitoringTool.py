@@ -3,85 +3,97 @@ import os
 import requests
 from scapy.all import *
 import sqlite3
+import yaml
 import json
+import ipaddress
+import datetime
 
-IPs = {}
-ip_observation = {}
+with open("config.yaml", 'r') as file:
+    config = yaml.safe_load(file)
+
 script_dir = os.path.dirname(os.path.abspath(__file__))
-safelist = os.path.join(script_dir, 'safelist.txt')
-countries = os.path.join(script_dir, 'countries.txt')
-checkApi = ''
-conn = ''
+safelist = os.path.join(script_dir, config['paths']['safelist'])
+countries = os.path.join(script_dir, config['paths']['countries'])
+if safelist != '':
+    safelist = open(safelist)
+    safelist = safelist.read()
+    safelist = safelist.split("\n")
+else:
+    safelist = False
+if countries != '':
+    countries = open(countries)
+    countries = countries.read()
+    countries = countries.split("\n")
+else:
+    countries = False
+checkApi = config['keys']['abuseipdb']
+intf = config['data']['network_interface']
+conn = sqlite3.connect(config['paths']['database'])
+threshold = config['data']['count_threshold']
+suspicious_ports = config['data']['suspicious_ports']
+abuse_threshold = config['data']['abuseipdb_threshold']
+
+recent_ips = {}
+ip_observation = {}
 c = ''
 
 def main():  
-    global safelist, countries, checkApi, conn, c
-    print("Choose the type of operation you want to perform.")
-    opType = input("live for live capture / read for capture file reading: ")
-    #safelist = input("if you want to check against a list of safe ips enter the txt files address: ")
-    if safelist != 0:
-        safelist = open(safelist)
-        safelist = safelist.read()
-        safelist = safelist.split("\n")
-    #countries = input("if you want to check against a list of unsafe countries enter the txt files address: ")
-    if countries != 0:
-        countries = open(countries)
-        countries = countries.read()
-        countries = countries.split("\n")
-    checkApi = input("if you want to check IPs against AbuseIPDB, enter the API key: ").strip()
-    conn = sqlite3.connect('PacketAnalyzer.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS ip_observations (
-                IP TEXT PRIMARY KEY,
-                Dport INTEGER,
-                Protocol INTEGER,
-                Country TEXT,
-                Risk INTEGER
-            )''')
-    conn.commit()
+    global conn, c
+    opType = input("Choose the mode (live/read): ")
+    db_structure()
     match (opType):
         case "live":
-            print("starting live capture")
-            liveCap()
+            print("Starting live capture")
+            live_cap()
             pass
         case "read":
-            print("state the file to capture from")
+            print("State the file to capture from")
+            read_cap()
             pass
         case _:
-            print("please enter a proper operation type \n\n")
-            main()
-            pass
-    ip_checker()
-    c.execute("SELECT * FROM ip_observations")
-    for row in c.fetchall():
-        print(row)
+            print("Please enter a proper operation type \n\n")
+            return
     conn.close()
-def liveCap():
-    #intf = input("which interface to sniff on: ")
-    intf = "Wi-Fi"
-    endcon = input("when should the capture end, time based or amount based: ")
+
+
+def read_cap():
+    return
+def live_cap():
+    endcon = input("Amount based or time based capture: ").lower()
     match (endcon):
         case "time":
-            timeO = int(input("how long to capture for: "))
+            timeO = int(input("How long to capture for: "))
             sniff(iface=intf, prn= analysis_func, store=False, filter="ip", timeout= timeO)
             pass
         case "amount":
-            counT = int(input("how many packets to capture: "))
+            counT = int(input("How many packets to capture: "))
             sniff(iface=intf, prn= analysis_func, store=False, filter="ip", count= counT)
             pass
         case _:
             print("Choose between time and amount")
-            liveCap()
+            live_cap()
             pass
 
 def analysis_func(pkt):
     if IP in pkt:
         src = pkt["IP"].src
+        # Check if the source IP is in the safelist
+        if safelist and src in safelist:
+            print(f"Packet from {src} is in the safelist, skipping analysis.")
+            return
         dst = pkt["IP"].dst
         proto = pkt["IP"].proto
+        tstamp = datetime.datetime.fromtimestamp(pkt.time).strftime('%Y-%m-%d %H:%M:%S')
+        size = len(pkt.payload)
         flags = 0
         sport = 0
         dport = 0
+        if src.startswith(('10.', '172.16.', '172.17.', '172.18.', '172.19.',
+                      '172.20.', '172.21.', '172.22.', '172.23.', '172.24.',
+                      '172.25.', '172.26.', '172.27.', '172.28.', '172.29.',
+                      '172.30.', '172.31.', '192.168.')):
+            print(f"Packet from {src} is from a private IP range, skipping analysis.")
+            return
         match (proto):
             case 6:
                 sport = pkt["TCP"].sport
@@ -92,77 +104,59 @@ def analysis_func(pkt):
                 sport = pkt["UDP"].sport
                 dport = pkt["UDP"].dport
                 pass
-            case 1:
-                pass
             case _:
                 print(f"Unknown protocol packet from {src}")
                 pass
-        
-        #print(f"source = {src}, destination = {dst}, protocol = {proto}, sport = {sport}, dport = {dport}, flags = {flags}")
-        packet_to_list(src, dst, proto, sport, dport, flags)
-
-def packet_to_list(src, dst, proto, sport, dport, flags):
-    global IPs
-    if src in safelist:
-        pass
-    else:
-        if src not in IPs:
-            IPs.update({src: {"proto": proto, "dport": dport, "flags": flags, "count" : 0}})
+        packet_to_database(1 ,gen_id(src), src, tstamp, 0)
+        if src in recent_ips:
+            recent_ips[src]["count"] += 1
         else:
-            count = IPs[src]["count"]+1
-            IPs.update({src: {"proto": proto, "dport": dport, "flags": flags, "count" : count}})
+            recent_ips.update({src: {"count": 1}})
+        pkt_checker(src, dst, proto, sport, dport, flags, size)
 
-def ip_checker():
-    global ip_observation, c
-    for ip in IPs:
-        response = get_country(ip)
-        ip_observation.update({ip: {"dport": IPs[ip]["dport"],  "proto": IPs[ip]["proto"], "country": response, "score": 0}})
-        # Check if the IP is from a dangerous country
+def pkt_checker(src, dst, proto, sport, dport, flags, size):
+    # Check if the source IP is from a dangerous country
+    if countries:
+        response = get_country(src)
         if response in countries:
-            print(f"Packet from {ip} is from an unsafe country: {response}")
-            ip_observation[ip]["score"] += 5
-        else:
-            ip_observation[ip]["score"] += 0
-        # Check against abuseipdb database for reports of malicious activity
-        if checkApi != '':
-            querystring = {
-                'ipAddress': ip,
-                'maxAgeInDays': '90'
-            }
-            headers = {
-                'Accept': 'application/json',
-                'Key': checkApi,
-            }
-            response = requests.request(method='GET', url='https://api.abuseipdb.com/api/v2/check', headers=headers, params=querystring)
-            response = json.loads(response.text)
-            if response["data"]["totalReports"] > 5:
-                print(f"Packet from {ip} has been reported {response['data']['totalReports']} times in the last 90 days")
-                ip_observation[ip]["score"] += 10
-        # Check for repeated packets from the same IP
-        if IPs[ip]["count"] > 10:
-            print(f"Packet from {ip} has been observed {IPs[ip]['count']} times")
-            ip_observation[ip]["score"] += 15
-        # Check for common attack ports
-        if IPs[ip]["dport"] in [22, 23, 445,3389]:
-            print(f"Packet from {ip} is targeting a common attack port: {IPs[ip]['dport']}")
-            ip_observation[ip]["score"] += 20
-    for ip, data in ip_observation.items():
-        c.execute('''
-            INSERT INTO ip_observations (IP, Dport, Protocol, Country, Risk)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(IP) DO UPDATE SET Risk = Risk + 1
-        ''', (ip, data["dport"], data["proto"], data["country"], data["score"]))
-    conn.commit()
+            print(f"Packet from {src} is from an unsafe country: {response}")
+            packet_to_database(1, gen_id(src), src, risk=5)
+            packet_to_database(2, gen_id(src), src, flag_reason=f"From {response}", source="GeoIP")
+    # Check against abuseipdb database for reports of malicious activity
+    if checkApi != '' and src not in recent_ips:
+        querystring = {
+            'ipAddress': src,
+            'maxAgeInDays': '90'
+        }
+        headers = {
+            'Accept': 'application/json',
+            'Key': checkApi,
+        }
+        response = requests.request(method='GET', url='https://api.abuseipdb.com/api/v2/check', headers=headers, params=querystring)
+        response = json.loads(response.text)
+        if response["data"]["totalReports"] > abuse_threshold:
+            print(f"Packet from {src} has been reported {response['data']['totalReports']} times in the last 90 days")
+            packet_to_database(1, gen_id(src), src, risk=10)
+            packet_to_database(2, gen_id(src), src, flag_reason=f"{response['data']['totalReports']} reports", source="AbuseIPDB")
+    # Check for repeated packets from the same IP
+    if recent_ips[src]["count"] > threshold:
+        print(f"Packet from {src} has been observed {recent_ips[src]['count']} times")
+        packet_to_database(1, gen_id(src), src, risk=5)
+        packet_to_database(2, gen_id(src), src, flag_reason=f"{recent_ips[src]['count']} packets observed", source="Internal Scans")
+    # Check for common attack ports
+    if dport in suspicious_ports:
+        print(f"Packet from {src} is targeting a common attack port: {dport}")
+        packet_to_database(1, gen_id(src), src, risk=20)
+        packet_to_database(2, gen_id(src), src, flag_reason=f"Targeting port {dport}", source="Port Scanning")
+    # Store raw packet summary in the database
+    packet_to_database(3, gen_id(src), src, proto=proto, sport=sport, dport=dport, size=size)
+# -------------- HELPER FUNCTIONS --------------
 def get_country(ip):
-    if ip.startswith(('10.', '172.16.', '172.17.', '172.18.', '172.19.',
-                      '172.20.', '172.21.', '172.22.', '172.23.', '172.24.',
-                      '172.25.', '172.26.', '172.27.', '172.28.', '172.29.',
-                      '172.30.', '172.31.', '192.168.')):
-        return "Private"
+    # Try to get the country of the IP address using the hackertarget API
     try:
         resp = requests.get(f'https://api.hackertarget.com/geoip/?q={ip}', timeout=5)
         lines = resp.text.splitlines()
-        if len(lines) >= 2
+        if len(lines) >= 2:
             parts = lines[1].split(',')
             if len(parts) >= 2:
                 country = parts[1].strip()
@@ -170,11 +164,65 @@ def get_country(ip):
         return "Unknown"
     except Exception:
         return "Unknown"
+def gen_id(src):
+    # Generate a unique ID based on the source IP
+    return int(ipaddress.IPv4Address(src))
+def read_id(id):
+    # Convert the unique ID back to an IP address
+    return str(ipaddress.IPv4Address(id))
+def db_structure():
+    global conn, c
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS ip_observations (
+                ID INTEGER PRIMARY KEY,
+                IP TEXT ,
+                FSEEN TEXT,
+                LSEEN TEXT,
+                RISK INTEGER
+            )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS suspicious_flags (
+               ID INTEGER PRIMARY KEY INCREMENT,
+               OBSERVATION_ID INTEGER,
+               FLAG_REASON TEXT,
+               SOURCE TEXT,
+               FOREIGN KEY (OBSERVATION_ID) REFERENCES ip_observations(ID) ON DELETE CASCADE
+            )''')
+    c.execute('''CREATE TABLE IF NOT EXISTS raw_packet_summary (
+               ID INTEGER PRIMARY KEY INCREMENT,
+               OBSERVATION_ID INTEGER,
+               PROTOCOL TEXT,
+               SRC_PORT INTEGER,
+               DST_PORT INTEGER,
+               PACKET_SIZE INTEGER,
+               FOREIGN KEY (OBSERVATION_ID) REFERENCES ip_observations(ID) ON DELETE CASCADE
+            )''')
+    conn.commit()
+def packet_to_database(type, id,src, time=None, risk=0, proto=None, sport=None, dport=None, flags=None, size=None, flag_reason=None, source=None):
+    match (type):
+        case 1:
+            c.execute('''
+                INSERT INTO ip_observations (ID, IP, FSEEN, LSEEN, RISK)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(ID) DO UPDATE SET LSEEN=excluded.LSEEN, RISK= RISK + excluded.RISK
+            ''', (id, src, time, time, risk))
+            conn.commit()
+            pass
+        case 2:
+            c.execute('''
+                INSERT INTO suspicious_flags (OBSERVATION_ID, FLAG_REASON, SOURCE)
+                VALUES (?, ?, ?)
+            ''', (id, flag_reason, source))
+            conn.commit()
+            pass
+        case 3:
+            c.execute('''
+                INSERT INTO raw_packet_summary (OBSERVATION_ID, PROTOCOL, SRC_PORT, DST_PORT, PACKET_SIZE)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (id, proto, sport, dport, size))
+            conn.commit()
+            pass
+        case _:
+            pass
 
-if len(sys.argv) > 1:
-    if sys.argv[1] == "live":
-        liveCap()
-    elif sys.argv[1] == "test":
-        ip_checker()
-else:
+if __name__ == "__main__":
     main()

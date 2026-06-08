@@ -1,0 +1,11 @@
+paths:
+  safelist: "safelist.txt"          # leave empty to disable
+  countries: "countries.txt"        # leave empty to disable
+  database: "PacketAnalyzer.db"
+
+data:
+  abuseipdb: "your_abuseipdb_key"   # leave empty to disable API checks
+  abuseipdb_threshold: 5            # min reports to flag as suspicious
+  network_interface: "Wi-Fi"         # change to your interface ("Wi-Fi" on windows / "en0" on macOS)
+  count_threshold: 10               # number of packets from same IP to trigger alert
+  suspicious_ports: [22, 23, 445, 3389] # common ports for attacks (SSH, Telnet, SMB, RDP)
