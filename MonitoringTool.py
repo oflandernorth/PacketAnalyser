@@ -154,12 +154,11 @@ def pkt_checker(src, dst, proto, sport, dport, flags, size):
     packet_to_database(3, gen_id(src), src, proto=proto, sport=sport, dport=dport, size=size)
 # -------------- HELPER FUNCTIONS --------------
 def get_country(ip):
-    # 1. Check the cache first (avoid hitting the API for the same IP)
+    # Check the cache first (avoid hitting the API for the same IP)
     if ip in recent_ips and "country" in recent_ips[ip]:
         return False
-    # 2. If not in cache, make the API call to ip-api.com
+    # If not in cache, make the API call to ip-api.com
     try:
-        # Use HTTP (free tier does not support HTTPS)
         url = f'http://ip-api.com/json/{ip}'
         response = requests.get(url, timeout=5)
         response.raise_for_status()
@@ -171,22 +170,11 @@ def get_country(ip):
             print(f"ip-api lookup failed for {ip}: {data.get('message', 'Unknown error')}")
             country = 'Unknown'
 
-        # Store the result in the cache
         recent_ips[ip]["country"] = country
-        print(f"IP {ip} is located in {country}")
         return country
 
-    except requests.exceptions.Timeout:
-        print(f"Timeout error for IP {ip}")
-        recent_ips[ip]["country"] = 'Unknown'
-        return 'Unknown'
-    except requests.exceptions.RequestException as e:
-        print(f"Request error for IP {ip}: {e}")
-        recent_ips[ip]["country"] = 'Unknown'
-        return 'Unknown'
-    except (KeyError, ValueError) as e:
-        print(f"Could not parse country from API response for IP {ip}: {e}")
-        recent_ips[ip]["country"] = 'Unknown'
+    except Exception as e:
+        print(f"Error during ip-api lookup for {ip}: {e}")
         return 'Unknown'
 def gen_id(src):
     # Generate a unique ID based on the source IP
