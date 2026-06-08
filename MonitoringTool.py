@@ -113,7 +113,7 @@ def analysis_func(pkt):
         if src in recent_ips:
             recent_ips[src]["count"] += 1
         else:
-            recent_ips.update({src: {"count": 1, "ApiChecked": False}})
+            recent_ips.update({src: {"count": 1, "ApiChecked": False, "CountryChecked": False}})
         # Check the packet against various criteria and flag if necessary
         pkt_checker(src, dst, proto, sport, dport, flags, size)
         # Store raw packet summary in the database
@@ -122,7 +122,7 @@ def analysis_func(pkt):
 def pkt_checker(src, dst, proto, sport, dport, flags, size):
     global recent_ips
     # Check if the source IP is from a dangerous country
-    if countries:
+    if countries and not recent_ips[src]["CountryChecked"]:
         response = get_country(src)
         if not response:
             pass
@@ -132,7 +132,7 @@ def pkt_checker(src, dst, proto, sport, dport, flags, size):
                 packet_to_database(1, gen_id(src), src, risk=risk_weights['suspicious_country'])
                 packet_to_database(2, gen_id(src), src, flag_reason=f"From {response}", source="GeoIP")
     # Check against abuseipdb database for reports of malicious activity
-    if checkApi not in ('', 'your_abuseipdb_key') and not src["ApiChecked"]:
+    if checkApi not in ('', 'your_abuseipdb_key') and not recent_ips[src]["ApiChecked"]:
         querystring = {
             'ipAddress': src,
             'maxAgeInDays': '90'
@@ -161,10 +161,8 @@ def pkt_checker(src, dst, proto, sport, dport, flags, size):
 
 # -------------- HELPER FUNCTIONS --------------
 def get_country(ip):
-    # Check the cache first (avoid hitting the API for the same IP)
-    if ip in recent_ips and "country" in recent_ips[ip]:
-        return False
-    # If not in cache, make the API call to ip-api.com
+    global recent_ips
+    # Make the API call to ip-api.com
     try:
         url = f'http://ip-api.com/json/{ip}'
         response = requests.get(url, timeout=5)
@@ -177,7 +175,7 @@ def get_country(ip):
             print(f"ip-api lookup failed for {ip}: {data.get('message', 'Unknown error')}")
             country = 'Unknown'
 
-        recent_ips[ip]["country"] = country
+        recent_ips[ip]["CountryChecked"] = True
         return country
 
     except Exception as e:
