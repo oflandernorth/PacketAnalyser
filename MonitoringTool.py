@@ -29,17 +29,18 @@ else:
 checkApi = config['data']['abuseipdb']
 intf = config['data']['network_interface']
 conn = sqlite3.connect(config['paths']['database'])
+conn.execute("PRAGMA foreign_keys = ON;")
+c = conn.cursor()
 threshold = config['data']['count_threshold']
 suspicious_ports = config['data']['suspicious_ports']
 abuse_threshold = config['data']['abuseipdb_threshold']
-risk_weights = config['data']['risk_weights']
+risk_weights = config['risk_weights']
 
 recent_ips = {}
-c = ''
 
 def main():  
     global conn, c
-    opType = input("Choose the mode (live/read): ")
+    opType = input("Choose the mode (live/read/database): ")
     db_structure()
     match (opType):
         case "live":
@@ -50,9 +51,64 @@ def main():
             print("State the file to capture from")
             read_cap()
             pass
+        case "database":
+            pass
         case _:
             print("Please enter a proper operation type \n\n")
             return
+    print('''
+          Choose the next step:
+            1. View top 10 suspicious IPs
+            2. View top 10 suspicious IPs with flags
+            3. Delete database and start over
+            4. Delete one IP from database
+            5. View all observations for one IP
+            6. Exit
+          ''')
+    nextStep = input("Enter the option number: ")
+    match (nextStep):
+        case "1":
+            for row in c.execute('SELECT IP, RISK FROM ip_observations ORDER BY RISK DESC LIMIT 10'):
+                print(f"IP: {row[0]}, Risk Score: {row[1]}")
+                pass
+            print("No observations recorded yet")
+            pass
+        case "2":
+            for row in c.execute('''
+                SELECT ip_observations.IP, ip_observations.RISK, GROUP_CONCAT(suspicious_flags.FLAG_REASON || ' (Source: ' || suspicious_flags.SOURCE || ')', '; ')
+                FROM ip_observations
+                LEFT JOIN suspicious_flags ON ip_observations.ID = suspicious_flags.OBSERVATION_ID
+                WHERE ip_observations.RISK > 0
+                GROUP BY ip_observations.ID
+                ORDER BY ip_observations.RISK DESC
+                LIMIT 10
+            '''):
+                print(f"IP: {row[0]}, Risk Score: {row[1]}, Flags: {row[2]}")
+            pass
+        case "3":
+            confirm = input("Are you sure you want to delete the entire database? (yes/no): ").lower()
+            if confirm == "yes":
+                c.execute('DELETE FROM ip_observations')
+                c.execute('DELETE FROM suspicious_flags')
+                c.execute('DELETE FROM raw_packet_summary')
+                conn.commit()
+                print("Database cleared.")
+            else:
+                print("Operation cancelled.")
+            pass
+        case "4":
+            ip = input("Enter the IP address to delete: ").strip()
+            c.execute('DELETE FROM ip_observations WHERE ID = ?', (gen_id(ip),))
+            conn.commit()
+        case "5":
+            ip = input("Enter the IP address to view observations for: ").strip()
+            for row in c.execute('SELECT * FROM ip_observations WHERE IP = ?', (ip,)):
+                print(f"Observation: {row}")
+        case "6":
+            print("Exiting...")
+            pass
+        case _:
+            print("Please enter a proper option number")
     conn.close()
 
 def read_cap():
@@ -149,7 +205,7 @@ def pkt_checker(src, dst, proto, sport, dport, flags, size):
             packet_to_database(1, gen_id(src), src, risk=risk_weights['abuseipdb'])
             packet_to_database(2, gen_id(src), src, flag_reason=f"{response['data']['totalReports']} reports", source="AbuseIPDB")
     # Check for repeated packets from the same IP
-    if recent_ips[src]["count"] > threshold:
+    if recent_ips[src]["count"] == threshold +1:
         print(f"Packet from {src} has been observed {recent_ips[src]['count']} times")
         packet_to_database(1, gen_id(src), src, risk=risk_weights['repeated_packets'])
         packet_to_database(2, gen_id(src), src, flag_reason=f"{recent_ips[src]['count']} packets observed", source="Internal Scans")
@@ -165,7 +221,7 @@ def get_country(ip):
     # Make the API call to ip-api.com
     try:
         url = f'http://ip-api.com/json/{ip}'
-        response = requests.get(url, timeout=5)
+        response = requests.get(url, timeout=20)
         response.raise_for_status()
 
         data = response.json()
@@ -189,7 +245,6 @@ def read_id(id):
     return str(ipaddress.IPv4Address(id))
 def db_structure():
     global conn, c
-    c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS ip_observations (
                 ID INTEGER PRIMARY KEY,
                 IP TEXT ,
