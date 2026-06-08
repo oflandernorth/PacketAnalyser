@@ -116,12 +116,14 @@ def analysis_func(pkt):
 def pkt_checker(src, dst, proto, sport, dport, flags, size):
     # Check if the source IP is from a dangerous country
     if countries:
-        print(f"Checking country for IP: {src}")
         response = get_country(src)
-        if response in countries:
-            print(f"Packet from {src} is from an unsafe country: {response}")
-            packet_to_database(1, gen_id(src), src, risk=5)
-            packet_to_database(2, gen_id(src), src, flag_reason=f"From {response}", source="GeoIP")
+        if not response:
+            pass
+        else:
+            if response in countries:
+                print(f"Packet from {src} is from an unsafe country: {response}")
+                packet_to_database(1, gen_id(src), src, risk=5)
+                packet_to_database(2, gen_id(src), src, flag_reason=f"From {response}", source="GeoIP")
     # Check against abuseipdb database for reports of malicious activity
     if checkApi != '' and src not in recent_ips:
         querystring = {
@@ -152,20 +154,40 @@ def pkt_checker(src, dst, proto, sport, dport, flags, size):
     packet_to_database(3, gen_id(src), src, proto=proto, sport=sport, dport=dport, size=size)
 # -------------- HELPER FUNCTIONS --------------
 def get_country(ip):
-    # Try to get the country of the IP address using the hackertarget API
+    # 1. Check the cache first (avoid hitting the API for the same IP)
+    if ip in recent_ips and "country" in recent_ips[ip]:
+        return False
+    # 2. If not in cache, make the API call to ip-api.com
     try:
-        print(f"Getting country for IP: {ip}")
-        resp = requests.get(f'https://api.hackertarget.com/geoip/?q={ip}', timeout=5)
-        lines = resp.text.splitlines()
-        if len(lines) >= 2:
-            parts = lines[1].split(',')
-            if len(parts) >= 2:
-                country = parts[1].strip()
-                print(f"Country for IP {ip}: {country}")
-                return country if country else "Unknown"
-        return "Unknown"
-    except Exception:
-        return "Unknown"
+        # Use HTTP (free tier does not support HTTPS)
+        url = f'http://ip-api.com/json/{ip}'
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+
+        data = response.json()
+        if data.get('status') == 'success':
+            country = data.get('country', 'Unknown')
+        else:
+            print(f"ip-api lookup failed for {ip}: {data.get('message', 'Unknown error')}")
+            country = 'Unknown'
+
+        # Store the result in the cache
+        recent_ips[ip]["country"] = country
+        print(f"IP {ip} is located in {country}")
+        return country
+
+    except requests.exceptions.Timeout:
+        print(f"Timeout error for IP {ip}")
+        recent_ips[ip]["country"] = 'Unknown'
+        return 'Unknown'
+    except requests.exceptions.RequestException as e:
+        print(f"Request error for IP {ip}: {e}")
+        recent_ips[ip]["country"] = 'Unknown'
+        return 'Unknown'
+    except (KeyError, ValueError) as e:
+        print(f"Could not parse country from API response for IP {ip}: {e}")
+        recent_ips[ip]["country"] = 'Unknown'
+        return 'Unknown'
 def gen_id(src):
     # Generate a unique ID based on the source IP
     return int(ipaddress.IPv4Address(src))
