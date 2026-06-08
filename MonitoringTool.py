@@ -26,7 +26,7 @@ if countries != '':
     countries = countries.split("\n")
 else:
     countries = False
-checkApi = config['keys']['abuseipdb']
+checkApi = config['data']['abuseipdb']
 intf = config['data']['network_interface']
 conn = sqlite3.connect(config['paths']['database'])
 threshold = config['data']['count_threshold']
