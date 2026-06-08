@@ -32,6 +32,7 @@ conn = sqlite3.connect(config['paths']['database'])
 threshold = config['data']['count_threshold']
 suspicious_ports = config['data']['suspicious_ports']
 abuse_threshold = config['data']['abuseipdb_threshold']
+risk_weights = config['data']['risk_weights']
 
 recent_ips = {}
 c = ''
@@ -113,7 +114,10 @@ def analysis_func(pkt):
             recent_ips[src]["count"] += 1
         else:
             recent_ips.update({src: {"count": 1, "ApiChecked": False}})
+        # Check the packet against various criteria and flag if necessary
         pkt_checker(src, dst, proto, sport, dport, flags, size)
+        # Store raw packet summary in the database
+        packet_to_database(3, gen_id(src), src, proto=proto, sport=sport, dport=dport, size=size)
 
 def pkt_checker(src, dst, proto, sport, dport, flags, size):
     global recent_ips
@@ -125,7 +129,7 @@ def pkt_checker(src, dst, proto, sport, dport, flags, size):
         else:
             if response in countries:
                 print(f"Packet from {src} is from an unsafe country: {response}")
-                packet_to_database(1, gen_id(src), src, risk=5)
+                packet_to_database(1, gen_id(src), src, risk=risk_weights['suspicious_country'])
                 packet_to_database(2, gen_id(src), src, flag_reason=f"From {response}", source="GeoIP")
     # Check against abuseipdb database for reports of malicious activity
     if checkApi not in ('', 'your_abuseipdb_key') and not src["ApiChecked"]:
@@ -142,20 +146,18 @@ def pkt_checker(src, dst, proto, sport, dport, flags, size):
         recent_ips[src]["ApiChecked"] = True
         if response["data"]["totalReports"] > abuse_threshold:
             print(f"Packet from {src} has been reported {response['data']['totalReports']} times in the last 90 days")
-            packet_to_database(1, gen_id(src), src, risk=10)
+            packet_to_database(1, gen_id(src), src, risk=risk_weights['abuseipdb'])
             packet_to_database(2, gen_id(src), src, flag_reason=f"{response['data']['totalReports']} reports", source="AbuseIPDB")
     # Check for repeated packets from the same IP
     if recent_ips[src]["count"] > threshold:
         print(f"Packet from {src} has been observed {recent_ips[src]['count']} times")
-        packet_to_database(1, gen_id(src), src, risk=5)
+        packet_to_database(1, gen_id(src), src, risk=risk_weights['repeated_packets'])
         packet_to_database(2, gen_id(src), src, flag_reason=f"{recent_ips[src]['count']} packets observed", source="Internal Scans")
     # Check for common attack ports
     if dport in suspicious_ports:
         print(f"Packet from {src} is targeting a common attack port: {dport}")
-        packet_to_database(1, gen_id(src), src, risk=20)
+        packet_to_database(1, gen_id(src), src, risk=risk_weights['suspicious_port'])
         packet_to_database(2, gen_id(src), src, flag_reason=f"Targeting port {dport}", source="Port Scanning")
-    # Store raw packet summary in the database
-    packet_to_database(3, gen_id(src), src, proto=proto, sport=sport, dport=dport, size=size)
 
 # -------------- HELPER FUNCTIONS --------------
 def get_country(ip):
