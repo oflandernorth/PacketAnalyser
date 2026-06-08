@@ -34,7 +34,6 @@ suspicious_ports = config['data']['suspicious_ports']
 abuse_threshold = config['data']['abuseipdb_threshold']
 
 recent_ips = {}
-ip_observation = {}
 c = ''
 
 def main():  
@@ -55,9 +54,12 @@ def main():
             return
     conn.close()
 
-
 def read_cap():
-    return
+    file = input("Pcap file location: ")
+    with PcapReader(file) as pcap_reader:
+        for pkt in pcap_reader:
+            analysis_func(pkt)
+
 def live_cap():
     endcon = input("Amount based or time based capture: ").lower()
     match (endcon):
@@ -110,10 +112,11 @@ def analysis_func(pkt):
         if src in recent_ips:
             recent_ips[src]["count"] += 1
         else:
-            recent_ips.update({src: {"count": 1}})
+            recent_ips.update({src: {"count": 1, "ApiChecked": False}})
         pkt_checker(src, dst, proto, sport, dport, flags, size)
 
 def pkt_checker(src, dst, proto, sport, dport, flags, size):
+    global recent_ips
     # Check if the source IP is from a dangerous country
     if countries:
         response = get_country(src)
@@ -125,7 +128,7 @@ def pkt_checker(src, dst, proto, sport, dport, flags, size):
                 packet_to_database(1, gen_id(src), src, risk=5)
                 packet_to_database(2, gen_id(src), src, flag_reason=f"From {response}", source="GeoIP")
     # Check against abuseipdb database for reports of malicious activity
-    if checkApi != '' and src not in recent_ips:
+    if checkApi not in ('', 'your_abuseipdb_key') and not src["ApiChecked"]:
         querystring = {
             'ipAddress': src,
             'maxAgeInDays': '90'
@@ -136,6 +139,7 @@ def pkt_checker(src, dst, proto, sport, dport, flags, size):
         }
         response = requests.request(method='GET', url='https://api.abuseipdb.com/api/v2/check', headers=headers, params=querystring)
         response = json.loads(response.text)
+        recent_ips[src]["ApiChecked"] = True
         if response["data"]["totalReports"] > abuse_threshold:
             print(f"Packet from {src} has been reported {response['data']['totalReports']} times in the last 90 days")
             packet_to_database(1, gen_id(src), src, risk=10)
@@ -152,6 +156,7 @@ def pkt_checker(src, dst, proto, sport, dport, flags, size):
         packet_to_database(2, gen_id(src), src, flag_reason=f"Targeting port {dport}", source="Port Scanning")
     # Store raw packet summary in the database
     packet_to_database(3, gen_id(src), src, proto=proto, sport=sport, dport=dport, size=size)
+
 # -------------- HELPER FUNCTIONS --------------
 def get_country(ip):
     # Check the cache first (avoid hitting the API for the same IP)
