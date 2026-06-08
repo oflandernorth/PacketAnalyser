@@ -1,4 +1,4 @@
-# PacketAnalyzer
+# PacketAnalyser
 
 A Python-based network traffic analysis tool that captures live packets or reads PCAP files, enriches source IPs with threat intelligence (AbuseIPDB, GeoIP), calculates dynamic risk scores, and stores structured results in a normalized SQLite database. Perfect for learning network security monitoring, threat hunting, and database design.
 
@@ -21,8 +21,8 @@ A Python-based network traffic analysis tool that captures live packets or reads
 ## Project Structure
 
 ```
-PacketAnalyzer/
-├── main.py                  # Main script (capture, analysis, DB)
+PacketAnalyser/
+├── MonitorTool.py                  # Main script (capture, analysis, DB)
 ├── config.yaml              # Configuration file
 ├── safelist.txt             # Optional: one IP per line to ignore
 ├── countries.txt            # Optional: high-risk country names (one per line)
@@ -78,7 +78,7 @@ data:
 Preferably Run the script using a venv with the required modules:
 
 ```bash
-python main.py
+python MonitorTool.py
 ```
 
 Then choose:
