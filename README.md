@@ -167,8 +167,9 @@ The following features are planned based on the project scope review. Contributi
 ### High Priority
 
 - [x] **Implement `read_cap()` function** – allow analysis of existing PCAP files (using `scapy`’s `rdpcap`).
-- [ ] **Time-series reporting** – add queries to show "Top 10 most suspicious IPs" and "IPs that changed risk level."
-- [ ] **Human-readable report** – after capture, print a summary to console and optionally export to CSV/JSON.
+- [x] **Time-series reporting** – add queries to show "Top 10 most suspicious IPs" and "IPs that changed risk level."
+- [x] **Human-readable report** – after capture, print a summary to console.
+- [ ] **Export to separate file** - export the summaries into a CSV/JSON.
 - [x] **Improve risk scoring** – make weights configurable in `config.yaml` (e.g., `risk_weights: {geoip: 5, abuseipdb: 10, port_scan: 20, volume: 5}`).
 
 ### Medium Priority
