@@ -92,7 +92,6 @@ def analysis_func(pkt):
                       '172.20.', '172.21.', '172.22.', '172.23.', '172.24.',
                       '172.25.', '172.26.', '172.27.', '172.28.', '172.29.',
                       '172.30.', '172.31.', '192.168.')):
-            print(f"Packet from {src} is from a private IP range, skipping analysis.")
             return
         match (proto):
             case 6:
@@ -117,6 +116,7 @@ def analysis_func(pkt):
 def pkt_checker(src, dst, proto, sport, dport, flags, size):
     # Check if the source IP is from a dangerous country
     if countries:
+        print(f"Checking country for IP: {src}")
         response = get_country(src)
         if response in countries:
             print(f"Packet from {src} is from an unsafe country: {response}")
@@ -154,12 +154,14 @@ def pkt_checker(src, dst, proto, sport, dport, flags, size):
 def get_country(ip):
     # Try to get the country of the IP address using the hackertarget API
     try:
+        print(f"Getting country for IP: {ip}")
         resp = requests.get(f'https://api.hackertarget.com/geoip/?q={ip}', timeout=5)
         lines = resp.text.splitlines()
         if len(lines) >= 2:
             parts = lines[1].split(',')
             if len(parts) >= 2:
                 country = parts[1].strip()
+                print(f"Country for IP {ip}: {country}")
                 return country if country else "Unknown"
         return "Unknown"
     except Exception:
@@ -181,14 +183,14 @@ def db_structure():
                 RISK INTEGER
             )''')
     c.execute('''CREATE TABLE IF NOT EXISTS suspicious_flags (
-               ID INTEGER PRIMARY KEY INCREMENT,
+               ID INTEGER PRIMARY KEY AUTOINCREMENT,
                OBSERVATION_ID INTEGER,
                FLAG_REASON TEXT,
                SOURCE TEXT,
                FOREIGN KEY (OBSERVATION_ID) REFERENCES ip_observations(ID) ON DELETE CASCADE
             )''')
     c.execute('''CREATE TABLE IF NOT EXISTS raw_packet_summary (
-               ID INTEGER PRIMARY KEY INCREMENT,
+               ID INTEGER PRIMARY KEY AUTOINCREMENT,
                OBSERVATION_ID INTEGER,
                PROTOCOL TEXT,
                SRC_PORT INTEGER,
