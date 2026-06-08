@@ -10,7 +10,7 @@ data:
   count_threshold: 10               # number of packets from same IP to trigger alert
   suspicious_ports: [22, 23, 445, 3389] # common ports for attacks (SSH, Telnet, SMB, RDP)
 risk_weights:
-  abuseipdb: 10
-  repeated_packets: 5
-  suspicious_port: 20
-  suspicious_country: 10
+  abuseipdb: 10 # weight for AbuseIPDB reports
+  repeated_packets: 5 # weight for multiple packets from same IP
+  suspicious_port: 20 # weight for packets targeting suspicious ports
+  suspicious_country: 10 # weight for packets from high-risk countries

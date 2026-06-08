@@ -47,7 +47,6 @@ pip install scapy requests pyyaml ipaddress
 ### 2. Obtain API Keys (Optional)
 
 - **AbuseIPDB** – Sign up at [AbuseIPDB](https://www.abuseipdb.com/) for a free API key.
-- (GeoIP uses a free API from hackertarget.com – no key required.)
 
 ### 3. Configure `config.yaml`
 
@@ -63,6 +62,11 @@ data:
   network_interface: "Wi-Fi"         # change to your interface ("Wi-Fi" on windows / "en0" on macOS)
   count_threshold: 10               # number of packets from same IP to trigger alert
   suspicious_ports: [22, 23, 445, 3389] # common ports for attacks (SSH, Telnet, SMB, RDP)
+risk_weights:
+  abuseipdb: 10 # weight for AbuseIPDB reports
+  repeated_packets: 5 # weight for multiple packets from same IP
+  suspicious_port: 20 # weight for packets targeting suspicious ports
+  suspicious_country: 10 # weight for packets from high-risk countries
 ```
 
 ### 4. Prepare Optional Lists
@@ -84,12 +88,15 @@ python MonitorTool.py
 Then choose:
 
 - `live` – capture live traffic from your network interface.
-- `read` – analyze a PCAP file (not yet implemented – see TODO).
+- `read` – analyze a PCAP file.
 
 For **live capture**, you'll be asked:
 
 - `time` – capture for a given number of seconds.
 - `amount` – capture a fixed number of packets.
+
+For **read mode**, you'll be asked:
+- `path to pcap` - will read the pcap file.
 
 The analysis runs in real-time, printing alerts and storing data in the SQLite database.
 
@@ -130,7 +137,7 @@ The tool uses a normalized SQLite database with three tables:
 
 ## Risk Scoring Logic
 
-Each time a packet is analyzed, the following checks add to the IP’s `RISK` score:
+Each time a packet is analyzed, the following (default) checks add to the IP’s `RISK` score:
 
 | Condition                                      | Risk Added |
 |------------------------------------------------|------------|
@@ -140,6 +147,8 @@ Each time a packet is analyzed, the following checks add to the IP’s `RISK` sc
 | Destination port is in `suspicious_ports`      | +20        |
 
 The final risk score is stored in `ip_observations.RISK` and can be queried for prioritization.
+
+You may change the risk weights in the config file
 
 ---
 
@@ -216,7 +225,7 @@ MIT – free to use, modify, and distribute.
 
 - Built with [Scapy](https://scapy.net/)
 - Threat intel: [AbuseIPDB](https://www.abuseipdb.com/)
-- GeoIP: [HackerTarget](https://hackertarget.com/ip-geolocation-api/)
+- GeoIP: [IPApi](https://ip-api.com/)
 - Inspired by SOC analyst workflows and the need for simple, transparent threat detection.
 
 ---
