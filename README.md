@@ -6,7 +6,7 @@ A Python-based network traffic analysis tool that captures live packets or reads
 
 ## Features
 
-- **Live or offline capture** – Sniff traffic from a network interface or analyze a previously saved capture (read mode coming soon – see TODO).
+- **Live or offline capture** – Sniff traffic from a network interface or analyze a previously saved capture.
 - **IP reputation checking** – Query AbuseIPDB API for malicious activity reports (free tier).
 - **Geographic risk** – Flag IPs from user-defined high-risk countries using a free GeoIP API.
 - **Port scanning detection** – Alert on connection attempts to commonly targeted ports (e.g., 22, 445, 3389).
