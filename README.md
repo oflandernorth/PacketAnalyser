@@ -22,7 +22,7 @@ A Python-based network traffic analysis tool that captures live packets or reads
 
 ```
 PacketAnalyser/
-├── main.py                  # Main script (capture, analysis, DB)
+├── MonitorTool.py                  # Main script (capture, analysis, DB)
 ├── config.yaml              # Configuration file
 ├── safelist.txt             # Optional: one IP per line to ignore
 ├── countries.txt            # Optional: high-risk country names (one per line)
@@ -78,7 +78,7 @@ data:
 Preferably Run the script using a venv with the required modules:
 
 ```bash
-python main.py
+python MonitorTool.py
 ```
 
 Then choose:
