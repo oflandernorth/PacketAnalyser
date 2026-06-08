@@ -162,11 +162,7 @@ def get_country(ip):
     try:
         resp = requests.get(f'https://api.hackertarget.com/geoip/?q={ip}', timeout=5)
         lines = resp.text.splitlines()
-        # Expected format: first line is header, second line is "IP: <ip>, Country: <country>, ..."
-        # Actually Hackertarget returns a line like: "192.0.2.1, United States, US"
-        # So better to split by comma and take the second field.
-        if len(lines) >= 2:
-            # The second line often contains the country (e.g., "185.143.232.201, Iran, IR")
+        if len(lines) >= 2
             parts = lines[1].split(',')
             if len(parts) >= 2:
                 country = parts[1].strip()
