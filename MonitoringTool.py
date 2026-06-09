@@ -26,7 +26,7 @@ if countries != '':
     countries = countries.split("\n")
 else:
     countries = False
-checkApi = config['data']['abuseipdb']
+abuseipdb_key = config['data']['abuseipdb']
 intf = config['data']['network_interface']
 conn = sqlite3.connect(config['paths']['database'])
 conn.execute("PRAGMA foreign_keys = ON;")
@@ -35,6 +35,7 @@ threshold = config['data']['count_threshold']
 suspicious_ports = config['data']['suspicious_ports']
 abuse_threshold = config['data']['abuseipdb_threshold']
 risk_weights = config['risk_weights']
+IPThreat_state = config['data']['ipthreat']
 
 recent_ips = {}
 
@@ -42,6 +43,8 @@ def main():
     global conn, c
     opType = input("Choose the mode (live/read/database): ")
     db_structure()
+    if IPThreat_state:
+        download_ipthreat()
     match (opType):
         case "live":
             print("Starting live capture")
@@ -169,7 +172,7 @@ def analysis_func(pkt):
         if src in recent_ips:
             recent_ips[src]["count"] += 1
         else:
-            recent_ips.update({src: {"count": 1, "ApiChecked": False, "CountryChecked": False}})
+            recent_ips.update({src: {"count": 1, "AbuseIPDB": False, "IPThreat": False, "CountryChecked": False}})
         # Check the packet against various criteria and flag if necessary
         pkt_checker(src, dst, proto, sport, dport, flags, size)
         # Store raw packet summary in the database
@@ -180,6 +183,7 @@ def pkt_checker(src, dst, proto, sport, dport, flags, size):
     # Check if the source IP is from a dangerous country
     if countries and not recent_ips[src]["CountryChecked"]:
         response = get_country(src)
+        recent_ips[src]["CountryChecked"] = True
         if not response:
             pass
         else:
@@ -188,18 +192,18 @@ def pkt_checker(src, dst, proto, sport, dport, flags, size):
                 packet_to_database(1, gen_id(src), src, risk=risk_weights['suspicious_country'])
                 packet_to_database(2, gen_id(src), src, flag_reason=f"From {response}", source="GeoIP")
     # Check against abuseipdb database for reports of malicious activity
-    if checkApi not in ('', 'your_abuseipdb_key') and not recent_ips[src]["ApiChecked"]:
+    if abuseipdb_key not in ('', 'your_abuseipdb_key') and not recent_ips[src]["AbuseIPDB"]:
         querystring = {
             'ipAddress': src,
             'maxAgeInDays': '90'
         }
         headers = {
             'Accept': 'application/json',
-            'Key': checkApi,
+            'Key': abuseipdb_key,
         }
         response = requests.request(method='GET', url='https://api.abuseipdb.com/api/v2/check', headers=headers, params=querystring)
         response = json.loads(response.text)
-        recent_ips[src]["ApiChecked"] = True
+        recent_ips[src]["AbuseIPDB"] = True
         if response["data"]["totalReports"] > abuse_threshold:
             print(f"Packet from {src} has been reported {response['data']['totalReports']} times in the last 90 days")
             packet_to_database(1, gen_id(src), src, risk=risk_weights['abuseipdb'])
@@ -214,6 +218,14 @@ def pkt_checker(src, dst, proto, sport, dport, flags, size):
         print(f"Packet from {src} is targeting a common attack port: {dport}")
         packet_to_database(1, gen_id(src), src, risk=risk_weights['suspicious_port'])
         packet_to_database(2, gen_id(src), src, flag_reason=f"Targeting port {dport}", source="Port Scanning")
+    # Check against the ipthreat list
+    if IPThreat_state and not recent_ips[src]["IPThreat"]:
+        level = check_ipthreat(src)
+        if level:
+            print(f"Packet from {src} is in the IPThreat list with a threat score of {level}")
+            packet_to_database(1, gen_id(src), src, risk=int(level))
+            packet_to_database(2, gen_id(src), src, flag_reason=f"Listed in IPThreat with a score of {level}", source="IPThreat List")
+            recent_ips[src]["IPThreat"] = True
 
 # -------------- HELPER FUNCTIONS --------------
 def get_country(ip):
@@ -243,6 +255,54 @@ def gen_id(src):
 def read_id(id):
     # Convert the unique ID back to an IP address
     return str(ipaddress.IPv4Address(id))
+def download_ipthreat():
+    # Download the IPThreat list from their website and turn it into a list
+    try:
+        url = 'https://lists.ipthreat.net/file/ipthreat-lists/threat/threat-1.txt'
+        response = requests.get(url)
+        response.raise_for_status()
+        global IPThreat
+        IPThreat = {}
+        for line in response.text.splitlines():
+            if not line.strip() or line.startswith('#'):
+                continue
+            parts = line.split(' # ')
+            if not parts:
+                continue
+            ip_or_range = parts[0].strip()
+            threat = parts[1].split(' ')[0]
+            if '-' in ip_or_range:
+                IPThreat[ip_or_range] = threat
+            else:
+                try:
+                    if '/' in ip_or_range:
+                        IPThreat[ip_or_range] = threat
+                    else:
+                        IPThreat[ip_or_range] = threat
+                except ValueError:
+                    print(f"Skipping invalid entry: {ip_or_range}")
+    except Exception as e:
+        print(f"Error during IPThreat list download: {e}")      
+def check_ipthreat(ip):
+    # Check if the ip itself is in the list
+    if ip in IPThreat:
+        return IPThreat[ip]
+    # If not maybe the range is in the list
+    for entry, level in IPThreat.items():
+        if '/' in entry:
+            try:
+                if ipaddress.ip_address(ip) in ipaddress.ip_network(entry, strict=False):
+                    return level
+            except ValueError:
+                continue
+        elif '-' in entry:
+            start, end = entry.split('-')
+            try:
+                if ipaddress.ip_address(start) <= ipaddress.ip_address(ip) <= ipaddress.ip_address(end):
+                    return level
+            except ValueError:
+                continue
+    return None     
 def db_structure():
     global conn, c
     c.execute('''CREATE TABLE IF NOT EXISTS ip_observations (
