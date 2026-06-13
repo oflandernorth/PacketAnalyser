@@ -1,5 +1,6 @@
 import sys
 import os
+import argparse
 import requests
 from scapy.all import *
 import sqlite3
@@ -45,7 +46,13 @@ IPThreat_state = config['data']['ipthreat']
 
 recent_ips = {}
 
-def main():  
+def main():
+    if len(sys.argv) > 1:
+        cli_mode()
+    else:
+        interactive()
+
+def interactive():  
     global conn, c
     opType = input(GREEN + "Choose the mode (live/read/database): " + RESET)
     db_structure()
@@ -54,13 +61,25 @@ def main():
             print(ORANGE + "Starting live capture" + RESET)
             if IPThreat_state:
                 download_ipthreat()
-            live_cap()
-            pass
+            endcon = input(GREEN + "Amount based or time based capture: " + RESET).lower()
+            match (endcon):
+                case "time":
+                    timeO = int(input(GREEN + "How long to capture for: " + RESET))
+                    live_cap('t', timeO)
+                    pass
+                case "amount":
+                    counT = int(input(GREEN + "How many packets to capture: " + RESET))
+                    live_cap('a', counT)
+                    pass
+                case _:
+                    print(GREEN + "Choose between time and amount" + RESET)
+                    pass
         case "read":
             print(ORANGE + "State the file to capture from" + RESET)
             if IPThreat_state:
                 download_ipthreat()
-            read_cap()
+            read_cap(file = input(GREEN + "Pcap file location: " + RESET)
+)
             pass
         case "database":
             pass
@@ -77,86 +96,90 @@ def main():
             6. Exit
           ''' + RESET)
     nextStep = input(GREEN + "Enter the option number: " + RESET)
-    match (nextStep):
-        case "1":
-            found = False
-            rows = []
-            for row in c.execute('SELECT IP, RISK FROM ip_observations ORDER BY RISK DESC LIMIT 10'):
-                found = True
-                rows.append(row)
-                print(ORANGE + f"IP: {row[0]}, Risk Score: {row[1]}" + RESET)
-            if not found:
-                print(ORANGE + "No data in database" + RESET)
-            else:
-                csv_export(rows, 'Top10Sum')    
-            pass
-        case "2":
-            found = False
-            rows = []
-            for row in c.execute('''
-                SELECT ip_observations.IP, ip_observations.RISK, GROUP_CONCAT(suspicious_flags.FLAG_REASON || ' (Source: ' || suspicious_flags.SOURCE || ')', '; ')
-                FROM ip_observations
-                LEFT JOIN suspicious_flags ON ip_observations.ID = suspicious_flags.OBSERVATION_ID
-                WHERE ip_observations.RISK > 0
-                GROUP BY ip_observations.ID
-                ORDER BY ip_observations.RISK DESC
-                LIMIT 10
-            '''):
-                found = True
-                rows.append(row)
-                print(ORANGE + f"IP: {row[0]}, Risk Score: {row[1]}, Flags: {row[2]}" + RESET)
-            if not found:
-                print(ORANGE + "No data in database" + RESET)
-            else:
-                csv_export(rows, 'Top10SumFlag')    
-            pass
-        case "3":
-            confirm = input(GREEN + "Are you sure you want to delete the data in database? (yes/no): " + RESET).lower()
-            if confirm == "yes":
-                c.execute('DELETE FROM ip_observations')
-                c.execute('DELETE FROM suspicious_flags')
-                c.execute('DELETE FROM raw_packet_summary')
-                conn.commit()
-                print(ORANGE + "Database cleared." + RESET)
-            else:
-                print(ORANGE + "Operation cancelled." + RESET)
-            pass
-        case "4":
-            ip = input(GREEN + "Enter the IP address to delete: " + RESET).strip()
-            c.execute('DELETE FROM ip_observations WHERE ID = ?', (gen_id(ip),))
-            conn.commit()
-        case "5":
-            ip = input(GREEN + "Enter the IP address to view observations for: " + RESET).strip()
-            for row in c.execute('SELECT * FROM ip_observations WHERE IP = ?', (ip,)):
-                print(ORANGE + f"Observation: {row}" + RESET)
-        case "6":
-            print(ORANGE + "Exiting..." + RESET)
-            pass
-        case _:
-            print(GREEN + "Please enter a proper option number" + RESET)
+    database(nextStep)
     conn.close()
 
-def read_cap():
-    file = input(GREEN + "Pcap file location: " + RESET)
+def cli_mode():
+    parser = argparse.ArgumentParser(description="Network IDS CLI")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # live command
+    live_parser = subparsers.add_parser("live", help="Live capture")
+    group = live_parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--timeout", type=int, help="Capture seconds")
+    group.add_argument("--count", type=int, help="Number of packets")
+
+    # read command
+    read_parser = subparsers.add_parser("read", help="Read pcap file")
+    read_parser.add_argument("file", help="Path to pcap")
+
+    # db command
+    db_parser = subparsers.add_parser("db", help="Database operations")
+    db_subparsers = db_parser.add_subparsers(dest="db_action", required=True)
+
+    # db top10
+    top10_parser = db_subparsers.add_parser("top10")
+    top10_parser.add_argument("--csv", action="store_true", help="Export CSV without prompt")
+
+    # db top10-flags
+    top10flags_parser = db_subparsers.add_parser("top10-flags")
+    top10flags_parser.add_argument("--csv", action="store_true", help="Export CSV without prompt")
+
+    # db reset
+    reset_parser = db_subparsers.add_parser("reset")
+    reset_parser.add_argument("--yes", action="store_true", help="Skip confirmation")
+
+    # db delete-ip
+    delete_parser = db_subparsers.add_parser("delete-ip")
+    delete_parser.add_argument("ip", help="IP address to delete")
+
+    # db view-ip
+    view_parser = db_subparsers.add_parser("view-ip")
+    view_parser.add_argument("ip", help="IP address to view")
+
+    args = parser.parse_args()
+
+    # Ensure database tables exist
+    db_structure()
+
+    # Dispatch
+    if args.command == "live":
+        if IPThreat_state:
+            download_ipthreat()
+        if args.timeout:
+            live_cap('t', args.timeout)
+        else:
+            live_cap('a', args.count)
+
+    elif args.command == "read":
+        if IPThreat_state:
+            download_ipthreat()
+        read_cap(args.file)
+
+    elif args.command == "db":
+        if args.db_action == "top10":
+            database("1", save=args.csv)
+        elif args.db_action == "top10-flags":
+            database("2", save=args.csv)
+        elif args.db_action == "reset":
+            database("3", y=args.yes)
+        elif args.db_action == "delete-ip":
+            database("4", ip=args.ip)
+        elif args.db_action == "view-ip":
+            database("5", ip=args.ip)
+
+    conn.close()
+
+def read_cap(file):
     with PcapReader(file) as pcap_reader:
         for pkt in pcap_reader:
             analysis_func(pkt)
 
-def live_cap():
-    endcon = input(GREEN + "Amount based or time based capture: " + RESET).lower()
-    match (endcon):
-        case "time":
-            timeO = int(input(GREEN + "How long to capture for: " + RESET))
-            sniff(iface=intf, prn= analysis_func, store=False, filter="ip", timeout= timeO)
-            pass
-        case "amount":
-            counT = int(input(GREEN + "How many packets to capture: " + RESET))
-            sniff(iface=intf, prn= analysis_func, store=False, filter="ip", count= counT)
-            pass
-        case _:
-            print(GREEN + "Choose between time and amount" + RESET)
-            live_cap()
-            pass
+def live_cap(type, value):
+    if type == 't':
+        sniff(iface=intf, prn= analysis_func, store=False, filter="ip", timeout= value)
+    else:
+        sniff(iface=intf, prn= analysis_func, store=False, filter="ip", count= value)
 
 def analysis_func(pkt):
     if IP in pkt:
@@ -249,6 +272,79 @@ def pkt_checker(src, dst, proto, sport, dport, flags, size):
             packet_to_database(2, gen_id(src), src, flag_reason=f"Listed in IPThreat with a score of {level}", source="IPThreat List")
             recent_ips[src]["IPThreat"] = True
 
+def database(option, save=False, y=False, ip=None):
+    match (option):
+        case "1":
+            found = False
+            rows = []
+            for row in c.execute('SELECT IP, RISK FROM ip_observations ORDER BY RISK DESC LIMIT 10'):
+                found = True
+                rows.append(row)
+                print(ORANGE + f"IP: {row[0]}, Risk Score: {row[1]}" + RESET)
+            if not found:
+                print(ORANGE + "No data in database" + RESET)
+            else:
+                csv_export(rows, 'Top10Sum', save)    
+            pass
+        case "2":
+            found = False
+            rows = []
+            for row in c.execute('''
+                SELECT ip_observations.IP, ip_observations.RISK, GROUP_CONCAT(suspicious_flags.FLAG_REASON || ' (Source: ' || suspicious_flags.SOURCE || ')', '; ')
+                FROM ip_observations
+                LEFT JOIN suspicious_flags ON ip_observations.ID = suspicious_flags.OBSERVATION_ID
+                WHERE ip_observations.RISK > 0
+                GROUP BY ip_observations.ID
+                ORDER BY ip_observations.RISK DESC
+                LIMIT 10
+            '''):
+                found = True
+                rows.append(row)
+                print(ORANGE + f"IP: {row[0]}, Risk Score: {row[1]}, Flags: {row[2]}" + RESET)
+            if not found:
+                print(ORANGE + "No data in database" + RESET)
+            else:
+                csv_export(rows, 'Top10SumFlag', save)    
+            pass
+        case "3":
+            if y:
+                c.execute('DELETE FROM ip_observations')
+                c.execute('DELETE FROM suspicious_flags')
+                c.execute('DELETE FROM raw_packet_summary')
+                conn.commit()
+                print(ORANGE + "Database cleared." + RESET)
+            else:
+                confirm = input(GREEN + "Are you sure you want to delete the data in database? (yes/no): " + RESET).lower()
+                if confirm == "yes":
+                    c.execute('DELETE FROM ip_observations')
+                    c.execute('DELETE FROM suspicious_flags')
+                    c.execute('DELETE FROM raw_packet_summary')
+                    conn.commit()
+                    print(ORANGE + "Database cleared." + RESET)
+                else:
+                    print(ORANGE + "Operation cancelled." + RESET)
+                pass
+        case "4":
+            if ip:
+                c.execute('DELETE FROM ip_observations WHERE ID = ?', (gen_id(ip),))
+                conn.commit()
+            else:
+                ip = input(GREEN + "Enter the IP address to delete: " + RESET).strip()
+                c.execute('DELETE FROM ip_observations WHERE ID = ?', (gen_id(ip),))
+                conn.commit()
+        case "5":
+            if ip:
+                for row in c.execute('SELECT * FROM ip_observations WHERE IP = ?', (ip,)):
+                    print(ORANGE + f"Observation: {row}" + RESET)
+            else:
+                ip = input(GREEN + "Enter the IP address to view observations for: " + RESET).strip()
+                for row in c.execute('SELECT * FROM ip_observations WHERE IP = ?', (ip,)):
+                    print(ORANGE + f"Observation: {row}" + RESET)
+        case "6":
+            print(ORANGE + "Exiting..." + RESET)
+            pass
+        case _:
+            print(GREEN + "Please enter a proper option number" + RESET)
 # -------------- HELPER FUNCTIONS --------------
 def get_country(ip):
     global recent_ips
@@ -377,11 +473,16 @@ def packet_to_database(type, id,src, time=None, risk=0, proto=None, sport=None, 
             pass
         case _:
             pass
-def csv_export(data, name):
-    if (input(GREEN + "Do you want to export to a csv file? (y/n): " + RESET) == 'y'):
-                    with open(f'{name}.csv', 'w', newline='') as f:
+def csv_export(data, name, save):
+    if save:
+        with open(f'{name}.csv', 'w', newline='') as f:
                         writer = csv.writer(f)
-                        writer.writerows(data)  
+                        writer.writerows(data)
+    else:
+        if (input(GREEN + "Do you want to export to a csv file? (y/n): " + RESET) == 'y'):
+                        with open(f'{name}.csv', 'w', newline='') as f:
+                            writer = csv.writer(f)
+                            writer.writerows(data)  
 
 if __name__ == "__main__":
     main()

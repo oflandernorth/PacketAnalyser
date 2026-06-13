@@ -1,6 +1,6 @@
 # PacketAnalyser
 
-A Python-based network traffic analysis tool that captures live packets or reads PCAP files, enriches source IPs with threat intelligence (AbuseIPDB, IPThreat, GeoIP), calculates dynamic risk scores, and stores structured results in a normalized SQLite database. Perfect for learning network security monitoring, threat hunting, and database design.
+A Python-based network traffic analysis tool that captures live packets or reads PCAP files, enriches source IPs with threat intelligence (AbuseIPDB, IPThreat, GeoIP), calculates dynamic risk scores, and stores structured results in a normalized SQLite database.
 
 ---
 
@@ -15,6 +15,9 @@ A Python-based network traffic analysis tool that captures live packets or reads
 - **Normalized database schema** – Three related tables: `ip_observations`, `suspicious_flags`, `raw_packet_summary`.
 - **Risk score accumulation** – Each suspicious activity adds a configurable weight to the IP’s running risk total.
 - **Post-capture analysis** – After capture, interactively query the database: view top suspicious IPs with flags, delete entries, or inspect a specific IP.
+- **CSV export** – Export top 10 results (simple or with flags) to CSV files.
+- **CLI mode** – Fully scriptable command‑line interface for live capture, PCAP reading, and database operations (see below).
+- **Colour‑coded output** – Clear visual distinction between normal info (green) and alerts (orange).
 - **Configurable via YAML** – No hardcoded values; adjust thresholds, API keys, risk weights, ports, and file paths easily.
 
 ---
@@ -23,7 +26,7 @@ A Python-based network traffic analysis tool that captures live packets or reads
 
 ```
 PacketAnalyser/
-├── MonitorTool.py           # Main script (capture, analysis, DB)
+├── MonitorTool.py           # Main script (capture, analysis, DB, CLI)
 ├── config.yaml              # Configuration file
 ├── safelist.txt             # Optional: one IP per line to ignore
 ├── countries.txt            # Optional: high-risk country names (one per line)
@@ -48,7 +51,6 @@ pip install scapy requests pyyaml ipaddress
 ### 2. Obtain API Keys (Optional)
 
 - **AbuseIPDB** – Sign up at [AbuseIPDB](https://www.abuseipdb.com/) for a free API key.
-- **IPThreat** – No key required; the tool automatically downloads the free threat list from [ipthreat.net](https://ipthreat.net/).
 
 ### 3. Configure `config.yaml`
 
@@ -83,38 +85,59 @@ risk_weights:
 
 ## Usage
 
-Run the script (using a virtual environment is recommended):
+The tool supports two modes of operation: **interactive** (no arguments) and **CLI** (command‑line driven).
+
+### Interactive Mode
+
+Run the script without arguments:
 
 ```bash
 python MonitorTool.py
 ```
 
-Then choose a mode:
+Then follow the prompts.
+When viewing top 10 results, you’ll be asked if you want to export them to a CSV file (the file is saved in the current directory as `Top10Sum.csv` or `Top10SumFlag.csv`).
 
-- `live` – capture live traffic from your network interface.
-- `read` – analyze an existing PCAP file.
-- `database` – (currently a placeholder) directly enter the post‑capture menu.
+### CLI Mode (Scriptable)
 
-For **live capture**, you'll be asked:
+All functionality is available via command‑line arguments – ideal for automation or integration into larger workflows.
 
-- `time` – capture for a given number of seconds.
-- `amount` – capture a fixed number of packets.
+#### Live capture
 
-For **read mode**, provide the path to a PCAP file.
+```bash
+# Capture for 60 seconds
+python MonitorTool.py live --timeout 60
 
-The analysis runs in real-time, printing alerts and storing data in the SQLite database. After the capture finishes (or if you chose `database`), you'll see an interactive menu:
-
-```
-Choose the next step:
-  1. View top 10 suspicious IPs
-  2. View top 10 suspicious IPs with flags
-  3. Delete database and start over
-  4. Delete one IP from database
-  5. View all observations for one IP
-  6. Exit
+# Capture exactly 500 packets
+python MonitorTool.py live --count 500
 ```
 
-Enter the number to query or manage the database.
+#### Read a PCAP file
+
+```bash
+python MonitorTool.py read capture.pcap
+```
+
+#### Database operations
+
+```bash
+# Show top 10 suspicious IPs (risk only)
+python MonitorTool.py db top10
+
+# Show top 10 with flags, and automatically export CSV (no prompt)
+python MonitorTool.py db top10-flags --csv
+
+# Clear all data (skip confirmation)
+python MonitorTool.py db reset --yes
+
+# Delete a specific IP
+python MonitorTool.py db delete-ip 192.0.2.5
+
+# View all observations for an IP
+python MonitorTool.py db view-ip 203.0.113.10
+```
+
+Currently the CLI arguments cannot be used together for more functionality, and i do not know if i will implement it.
 
 ---
 
@@ -171,7 +194,7 @@ You can modify all weights in `config.yaml`.
 
 ## Example Output
 
-**Live capture alerts:**
+**Live capture alerts (coloured):**
 ```
 Starting live capture
 Packet from 185.130.5.253 is from an unsafe country: Russia
@@ -183,6 +206,14 @@ Packet from 93.184.216.34 is in the IPThreat list with a threat score of 5
 **Post‑capture query (option 2):**
 ```
 IP: 185.130.5.253, Risk Score: 45, Flags: From Russia (Source: GeoIP); 12 reports (Source: AbuseIPDB); Targeting port 445 (Source: Port Scanning)
+```
+
+**CSV export** (example `Top10SumFlag.csv`):
+```
+IP,RISK,FLAGS
+185.130.5.253,45,"From Russia (Source: GeoIP); 12 reports (Source: AbuseIPDB); Targeting port 445 (Source: Port Scanning)"
+93.184.216.34,5,"Listed in IPThreat with a score of 5 (Source: IPThreat List)"
+...
 ```
 
 ---
@@ -197,13 +228,13 @@ The following features are planned or already implemented.
 - ✅ **Implement `read_cap()` function** – analysis of existing PCAP files using `scapy`’s `PcapReader`.
 - ✅ **Time-series reporting** – queries to show "Top 10 most suspicious IPs" and IPs with flags.
 - ✅ **Human-readable report** – post‑capture interactive console menu.
-- ✅ **Export to CSV/JSON** – save summaries to external files.
+- ✅ **Export to CSV** – save top 10 summaries to CSV files.
 - ✅ **Configurable risk scoring** – weights in `config.yaml`.
 
 ### Medium Priority
 
 - ✅ **Add other threat intel sources** – IPThreat list integration.
-- 📝 **Command-line arguments** – `--interface`, `--timeout`, `--pcap` instead of interactive prompts.
+- ✅ **Command-line arguments** – `live`, `read`, `db` subcommands with options (`--timeout`, `--count`, `--csv`, `--yes`).
 - 📝 **Asynchronous API queries** – prevent packet processing from blocking on slow HTTP requests.
 
 ### Low Priority / Stretch Goals
