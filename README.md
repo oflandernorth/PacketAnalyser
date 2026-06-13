@@ -197,7 +197,7 @@ The following features are planned or already implemented.
 - ✅ **Implement `read_cap()` function** – analysis of existing PCAP files using `scapy`’s `PcapReader`.
 - ✅ **Time-series reporting** – queries to show "Top 10 most suspicious IPs" and IPs with flags.
 - ✅ **Human-readable report** – post‑capture interactive console menu.
-- 📝 **Export to CSV/JSON** – save summaries to external files.
+- ✅ **Export to CSV/JSON** – save summaries to external files.
 - ✅ **Configurable risk scoring** – weights in `config.yaml`.
 
 ### Medium Priority

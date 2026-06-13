@@ -5,6 +5,7 @@ from scapy.all import *
 import sqlite3
 import yaml
 import json
+import csv
 import ipaddress
 import datetime
 
@@ -43,21 +44,23 @@ def main():
     global conn, c
     opType = input("Choose the mode (live/read/database): ")
     db_structure()
-    if IPThreat_state:
-        download_ipthreat()
     match (opType):
         case "live":
             print("Starting live capture")
+            if IPThreat_state:
+                download_ipthreat()
             live_cap()
             pass
         case "read":
             print("State the file to capture from")
+            if IPThreat_state:
+                download_ipthreat()
             read_cap()
             pass
         case "database":
             pass
         case _:
-            print("Please enter a proper operation type \n\n")
+            print("Please enter a proper operation mode \n\n")
             return
     print('''
           Choose the next step:
@@ -71,12 +74,20 @@ def main():
     nextStep = input("Enter the option number: ")
     match (nextStep):
         case "1":
+            found = False
+            rows = []
             for row in c.execute('SELECT IP, RISK FROM ip_observations ORDER BY RISK DESC LIMIT 10'):
+                found = True
+                rows.append(row)
                 print(f"IP: {row[0]}, Risk Score: {row[1]}")
-                pass
-            print("No observations recorded yet")
+            if not found:
+                print("No data in database")
+            else:
+                csv_export(rows, 'Top10Sum')    
             pass
         case "2":
+            found = False
+            rows = []
             for row in c.execute('''
                 SELECT ip_observations.IP, ip_observations.RISK, GROUP_CONCAT(suspicious_flags.FLAG_REASON || ' (Source: ' || suspicious_flags.SOURCE || ')', '; ')
                 FROM ip_observations
@@ -86,10 +97,16 @@ def main():
                 ORDER BY ip_observations.RISK DESC
                 LIMIT 10
             '''):
+                found = True
+                rows.append(row)
                 print(f"IP: {row[0]}, Risk Score: {row[1]}, Flags: {row[2]}")
+            if not found:
+                print("No data in database")
+            else:
+                csv_export(rows, 'Top10SumFlag')    
             pass
         case "3":
-            confirm = input("Are you sure you want to delete the entire database? (yes/no): ").lower()
+            confirm = input("Are you sure you want to delete the data in database? (yes/no): ").lower()
             if confirm == "yes":
                 c.execute('DELETE FROM ip_observations')
                 c.execute('DELETE FROM suspicious_flags')
@@ -355,6 +372,11 @@ def packet_to_database(type, id,src, time=None, risk=0, proto=None, sport=None, 
             pass
         case _:
             pass
+def csv_export(data, name):
+    if (input("Do you want to export to a csv file? (y/n): ") == 'y'):
+                    with open(f'{name}.csv', 'w', newline='') as f:
+                        writer = csv.writer(f)
+                        writer.writerows(data)  
 
 if __name__ == "__main__":
     main()
