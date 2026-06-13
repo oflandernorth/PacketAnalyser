@@ -9,6 +9,11 @@ import csv
 import ipaddress
 import datetime
 
+# ANSI color codes
+GREEN = "\033[92m"
+ORANGE = "\033[93m"
+RESET = "\033[0m"
+
 with open("config.yaml", 'r') as file:
     config = yaml.safe_load(file)
 
@@ -42,17 +47,17 @@ recent_ips = {}
 
 def main():  
     global conn, c
-    opType = input("Choose the mode (live/read/database): ")
+    opType = input(GREEN + "Choose the mode (live/read/database): " + RESET)
     db_structure()
     match (opType):
         case "live":
-            print("Starting live capture")
+            print(ORANGE + "Starting live capture" + RESET)
             if IPThreat_state:
                 download_ipthreat()
             live_cap()
             pass
         case "read":
-            print("State the file to capture from")
+            print(ORANGE + "State the file to capture from" + RESET)
             if IPThreat_state:
                 download_ipthreat()
             read_cap()
@@ -60,9 +65,9 @@ def main():
         case "database":
             pass
         case _:
-            print("Please enter a proper operation mode \n\n")
+            print(GREEN + "Please enter a proper operation mode \n\n" + RESET)
             return
-    print('''
+    print(ORANGE + '''
           Choose the next step:
             1. View top 10 suspicious IPs
             2. View top 10 suspicious IPs with flags
@@ -70,8 +75,8 @@ def main():
             4. Delete one IP from database
             5. View all observations for one IP
             6. Exit
-          ''')
-    nextStep = input("Enter the option number: ")
+          ''' + RESET)
+    nextStep = input(GREEN + "Enter the option number: " + RESET)
     match (nextStep):
         case "1":
             found = False
@@ -79,9 +84,9 @@ def main():
             for row in c.execute('SELECT IP, RISK FROM ip_observations ORDER BY RISK DESC LIMIT 10'):
                 found = True
                 rows.append(row)
-                print(f"IP: {row[0]}, Risk Score: {row[1]}")
+                print(ORANGE + f"IP: {row[0]}, Risk Score: {row[1]}" + RESET)
             if not found:
-                print("No data in database")
+                print(ORANGE + "No data in database" + RESET)
             else:
                 csv_export(rows, 'Top10Sum')    
             pass
@@ -99,57 +104,57 @@ def main():
             '''):
                 found = True
                 rows.append(row)
-                print(f"IP: {row[0]}, Risk Score: {row[1]}, Flags: {row[2]}")
+                print(ORANGE + f"IP: {row[0]}, Risk Score: {row[1]}, Flags: {row[2]}" + RESET)
             if not found:
-                print("No data in database")
+                print(ORANGE + "No data in database" + RESET)
             else:
                 csv_export(rows, 'Top10SumFlag')    
             pass
         case "3":
-            confirm = input("Are you sure you want to delete the data in database? (yes/no): ").lower()
+            confirm = input(GREEN + "Are you sure you want to delete the data in database? (yes/no): " + RESET).lower()
             if confirm == "yes":
                 c.execute('DELETE FROM ip_observations')
                 c.execute('DELETE FROM suspicious_flags')
                 c.execute('DELETE FROM raw_packet_summary')
                 conn.commit()
-                print("Database cleared.")
+                print(ORANGE + "Database cleared." + RESET)
             else:
-                print("Operation cancelled.")
+                print(ORANGE + "Operation cancelled." + RESET)
             pass
         case "4":
-            ip = input("Enter the IP address to delete: ").strip()
+            ip = input(GREEN + "Enter the IP address to delete: " + RESET).strip()
             c.execute('DELETE FROM ip_observations WHERE ID = ?', (gen_id(ip),))
             conn.commit()
         case "5":
-            ip = input("Enter the IP address to view observations for: ").strip()
+            ip = input(GREEN + "Enter the IP address to view observations for: " + RESET).strip()
             for row in c.execute('SELECT * FROM ip_observations WHERE IP = ?', (ip,)):
-                print(f"Observation: {row}")
+                print(ORANGE + f"Observation: {row}" + RESET)
         case "6":
-            print("Exiting...")
+            print(ORANGE + "Exiting..." + RESET)
             pass
         case _:
-            print("Please enter a proper option number")
+            print(GREEN + "Please enter a proper option number" + RESET)
     conn.close()
 
 def read_cap():
-    file = input("Pcap file location: ")
+    file = input(GREEN + "Pcap file location: " + RESET)
     with PcapReader(file) as pcap_reader:
         for pkt in pcap_reader:
             analysis_func(pkt)
 
 def live_cap():
-    endcon = input("Amount based or time based capture: ").lower()
+    endcon = input(GREEN + "Amount based or time based capture: " + RESET).lower()
     match (endcon):
         case "time":
-            timeO = int(input("How long to capture for: "))
+            timeO = int(input(GREEN + "How long to capture for: " + RESET))
             sniff(iface=intf, prn= analysis_func, store=False, filter="ip", timeout= timeO)
             pass
         case "amount":
-            counT = int(input("How many packets to capture: "))
+            counT = int(input(GREEN + "How many packets to capture: " + RESET))
             sniff(iface=intf, prn= analysis_func, store=False, filter="ip", count= counT)
             pass
         case _:
-            print("Choose between time and amount")
+            print(GREEN + "Choose between time and amount" + RESET)
             live_cap()
             pass
 
@@ -158,7 +163,7 @@ def analysis_func(pkt):
         src = pkt["IP"].src
         # Check if the source IP is in the safelist
         if safelist and src in safelist:
-            print(f"Packet from {src} is in the safelist, skipping analysis.")
+            print(ORANGE + f"Packet from {src} is in the safelist, skipping analysis." + RESET)
             return
         dst = pkt["IP"].dst
         proto = pkt["IP"].proto
@@ -183,7 +188,7 @@ def analysis_func(pkt):
                 dport = pkt["UDP"].dport
                 pass
             case _:
-                print(f"Unknown protocol packet from {src}")
+                print(GREEN + f"Unknown protocol packet from {src}" + RESET)
                 pass
         packet_to_database(1 ,gen_id(src), src, tstamp, 0)
         if src in recent_ips:
@@ -205,7 +210,7 @@ def pkt_checker(src, dst, proto, sport, dport, flags, size):
             pass
         else:
             if response in countries:
-                print(f"Packet from {src} is from an unsafe country: {response}")
+                print(ORANGE + f"Packet from {src} is from an unsafe country: {response}" + RESET)
                 packet_to_database(1, gen_id(src), src, risk=risk_weights['suspicious_country'])
                 packet_to_database(2, gen_id(src), src, flag_reason=f"From {response}", source="GeoIP")
     # Check against abuseipdb database for reports of malicious activity
@@ -222,24 +227,24 @@ def pkt_checker(src, dst, proto, sport, dport, flags, size):
         response = json.loads(response.text)
         recent_ips[src]["AbuseIPDB"] = True
         if response["data"]["totalReports"] > abuse_threshold:
-            print(f"Packet from {src} has been reported {response['data']['totalReports']} times in the last 90 days")
+            print(ORANGE + f"Packet from {src} has been reported {response['data']['totalReports']} times in the last 90 days" + RESET)
             packet_to_database(1, gen_id(src), src, risk=risk_weights['abuseipdb'])
             packet_to_database(2, gen_id(src), src, flag_reason=f"{response['data']['totalReports']} reports", source="AbuseIPDB")
     # Check for repeated packets from the same IP
     if recent_ips[src]["count"] == threshold +1:
-        print(f"Packet from {src} has been observed {recent_ips[src]['count']} times")
+        print(ORANGE + f"Packet from {src} has been observed {recent_ips[src]['count']} times" + RESET)
         packet_to_database(1, gen_id(src), src, risk=risk_weights['repeated_packets'])
         packet_to_database(2, gen_id(src), src, flag_reason=f"{recent_ips[src]['count']} packets observed", source="Internal Scans")
     # Check for common attack ports
     if dport in suspicious_ports:
-        print(f"Packet from {src} is targeting a common attack port: {dport}")
+        print(ORANGE + f"Packet from {src} is targeting a common attack port: {dport}" + RESET)
         packet_to_database(1, gen_id(src), src, risk=risk_weights['suspicious_port'])
         packet_to_database(2, gen_id(src), src, flag_reason=f"Targeting port {dport}", source="Port Scanning")
     # Check against the ipthreat list
     if IPThreat_state and not recent_ips[src]["IPThreat"]:
         level = check_ipthreat(src)
         if level:
-            print(f"Packet from {src} is in the IPThreat list with a threat score of {level}")
+            print(ORANGE + f"Packet from {src} is in the IPThreat list with a threat score of {level}" + RESET)
             packet_to_database(1, gen_id(src), src, risk=int(level))
             packet_to_database(2, gen_id(src), src, flag_reason=f"Listed in IPThreat with a score of {level}", source="IPThreat List")
             recent_ips[src]["IPThreat"] = True
@@ -257,14 +262,14 @@ def get_country(ip):
         if data.get('status') == 'success':
             country = data.get('country', 'Unknown')
         else:
-            print(f"ip-api lookup failed for {ip}: {data.get('message', 'Unknown error')}")
+            print(GREEN + f"ip-api lookup failed for {ip}: {data.get('message', 'Unknown error')}" + RESET)
             country = 'Unknown'
 
         recent_ips[ip]["CountryChecked"] = True
         return country
 
     except Exception as e:
-        print(f"Error during ip-api lookup for {ip}: {e}")
+        print(GREEN + f"Error during ip-api lookup for {ip}: {e}" + RESET)
         return 'Unknown'
 def gen_id(src):
     # Generate a unique ID based on the source IP
@@ -297,9 +302,9 @@ def download_ipthreat():
                     else:
                         IPThreat[ip_or_range] = threat
                 except ValueError:
-                    print(f"Skipping invalid entry: {ip_or_range}")
+                    print(GREEN + f"Skipping invalid entry: {ip_or_range}" + RESET)
     except Exception as e:
-        print(f"Error during IPThreat list download: {e}")      
+        print(GREEN + f"Error during IPThreat list download: {e}" + RESET)      
 def check_ipthreat(ip):
     # Check if the ip itself is in the list
     if ip in IPThreat:
@@ -373,7 +378,7 @@ def packet_to_database(type, id,src, time=None, risk=0, proto=None, sport=None, 
         case _:
             pass
 def csv_export(data, name):
-    if (input("Do you want to export to a csv file? (y/n): ") == 'y'):
+    if (input(GREEN + "Do you want to export to a csv file? (y/n): " + RESET) == 'y'):
                     with open(f'{name}.csv', 'w', newline='') as f:
                         writer = csv.writer(f)
                         writer.writerows(data)  
